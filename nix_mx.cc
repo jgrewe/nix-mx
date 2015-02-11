@@ -11,90 +11,6 @@
 
 // *** datatype converter
 
-template<typename T>
-struct to_mx_class_id {
-
-    static std::pair<mxClassID, mxComplexity> value() {
-        nix::DataType dtype = nix::to_data_type<T>::value;
-        switch (dtype) {
-            case nix::DataType::Double:
-                return std::make_pair(mxDOUBLE_CLASS, mxREAL);
-
-            case nix::DataType::Int64:
-                return std::make_pair(mxINT64_CLASS, mxREAL);
-
-            case nix::DataType::Int32:
-                return std::make_pair(mxINT32_CLASS, mxREAL);
-
-            default:
-                mexErrMsgIdAndTxt("nix:toclassid:notimplemented", "Implement me!");
-                return std::make_pair(mxVOID_CLASS, mxREAL);
-        }
-    }
-
-};
-
-
-mxArray* make_mx_array(const std::string &s)
-{
-    return mxCreateString(s.c_str());
-}
-
-template<typename T>
-mxArray* make_mx_array(const std::vector<T> &v) {
-    std::pair<mxClassID, mxComplexity> klass = to_mx_class_id<T>::value();
-    mxArray *data = mxCreateNumericMatrix(1, v.size(), klass.first, klass.second);
-    double *ptr = mxGetPr(data);
-    memcpy(ptr, v.data(), sizeof(T) * v.size());
-    return data;
-}
-
-template<>
-mxArray* make_mx_array(const std::vector<std::string> &v) {
-
-    if (v.empty()) {
-        return nullptr;
-    }
-
-    mxArray *data = mxCreateCellMatrix(1, v.size());
-    for (size_t i = 0; i < v.size(); i++) {
-        mxSetCell(data, i, mxCreateString(v[i].c_str()));
-    }
-
-    return data;
-}
-
-template<typename T>
-mxArray* make_mx_array(const boost::optional<T> &opt) {
-    if (opt) {
-        make_mx_array(*opt);
-    }
-
-    return nullptr;
-}
-
-template<typename T>
-mxArray* make_mx_array(T val, typename std::enable_if<std::is_arithmetic<T>::value >::type* = nullptr) {
-    std::pair<mxClassID, mxComplexity> klass = to_mx_class_id<T>::value();
-    mxArray *arr = mxCreateNumericMatrix(1, 1, klass.first, klass.second);
-    void *data = mxGetData(arr);
-    memcpy(data, &val, sizeof(T));
-    return arr;
-}
-
-static mxArray* make_mx_array(const nix::NDSize &size)
-{
-    mxArray *res = mxCreateNumericMatrix(1, size.size(), mxUINT64_CLASS, mxREAL);
-    void *ptr = mxGetData(res);
-    uint64_t *data = static_cast<uint64_t *>(ptr);
-
-    for (size_t i = 0; i < size.size(); i++) {
-        data[i] = static_cast<uint64_t>(size[i]);
-    }
-
-    return res;
-}
-
 struct struct_builder {
 
     struct_builder(std::vector<size_t> dims, std::vector<const char *> f)
@@ -158,12 +74,20 @@ static void entity_destory(const extractor &input, infusor &output)
 
 static void open_file(const extractor &input, infusor &output)
 {
-    input.require_arguments({mxCHAR_CLASS, mxCHAR_CLASS}, true);
     mexPrintf("[+] open_file\n");
 
-    std::string name = input.str(1);
+	std::string name = input.str(1);
+	uint8_t omode = input.num<uint8_t>(2);
+	nix::FileMode mode;
 
-    nix::File fn = nix::File::open(name, nix::FileMode::ReadWrite);
+	switch (omode) {
+	case 0: mode = nix::FileMode::ReadOnly; break;
+	case 1: mode = nix::FileMode::ReadWrite; break;
+	case 2: mode = nix::FileMode::Overwrite; break;
+	default: throw std::invalid_argument("unkown open mode");
+	}
+
+    nix::File fn = nix::File::open(name, mode);
     handle h = handle(fn);
 
     output.set(0, h);
@@ -196,6 +120,20 @@ static void open_block(const extractor &input, infusor &output)
     nix::Block block = nf.getBlock(input.str(2));
     handle bb = handle(block);
     output.set(0, bb);
+}
+
+static void block_describe(const extractor &input, infusor &output)
+{
+	mexPrintf("[+] block::describe\n");
+	nix::Block block = input.entity<nix::Block>(1);
+
+	struct_builder sb({ 1 }, { "name", "id", "type" });
+
+	sb.set(block.name());
+	sb.set(block.id());
+	sb.set(block.type());
+	
+	output.set(0, sb.array());
 }
 
 static void open_data_array(const extractor &input, infusor &output)
@@ -373,6 +311,7 @@ const std::vector<fendpoint> funcs = {
         {"File::open", open_file},
         {"File::listBlocks", list_blocks},
         {"File::openBlock", open_block},
+		{"Block::describe", block_describe},
         {"Block::openDataArray", open_data_array},
         {"Block::listDataArrays", block_list_data_arrays},
         {"DataArray::describe", data_array_describe},
@@ -395,9 +334,11 @@ void mexFunction(int            nlhs,
     bool processed = false;
     for (const auto &fn : funcs) {
         if (fn.name == cmd) {
-            try {
-                fn.fn(input, output);
-            } catch (std::exception &e) {
+			try {
+				fn.fn(input, output);
+			} catch (const std::invalid_argument &e) {
+				mexErrMsgIdAndTxt("nix:arg:inval", e.what());
+            } catch (const std::exception &e) {
                 mexErrMsgIdAndTxt("nix:arg:dispatch", e.what());
             } catch (...) {
                 mexErrMsgIdAndTxt("nix:arg:dispatch", "unkown exception");

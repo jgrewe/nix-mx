@@ -3,6 +3,10 @@
 #define NIX_MX_ARGUMENTS_H
 
 #include "handle.h"
+#include "datatypes.h"
+#include "mkarray.h"
+
+#include <stdexcept>
 
 // *** argument helpers ***
 
@@ -12,8 +16,11 @@ public:
 
     argument_helper(T **arg, size_t n) : array(arg), number(n) { }
 
-    bool check_size(int pos, bool fatal = false) const {
+    bool check_size(size_t pos, bool fatal = false) const {
         bool res = pos + 1 > number;
+		if (!res && fatal) {
+			throw std::out_of_range("argument position is out of bounds");
+		}
         return res;
     }
 
@@ -37,6 +44,19 @@ public:
         return res;
     }
 
+	void check_arg_type(int pos, nix::DataType dtype) const {
+		if (pos < 0) {
+			throw std::invalid_argument("negative position");
+		}
+
+		size_t n = static_cast<size_t>(pos);
+		check_size(n);
+
+		if (dtype_mex2nix(array[n]) != dtype) {
+			throw std::invalid_argument("wrong type");
+		}
+	}
+
 protected:
     T **array;
     size_t number;
@@ -47,19 +67,27 @@ public:
     extractor(const mxArray **arr, int n) : argument_helper(arr, n) { }
 
     std::string str(int pos) const {
-        //make sure it is a string
+		check_arg_type(pos, nix::DataType::String);
+
         char *tmp = mxArrayToString(array[pos]);
         std::string the_string(tmp);
         mxFree(tmp);
         return the_string;
     }
 
+	template<typename T>
+	T num(int pos) const {
+		nix::DataType dtype = nix::to_data_type<T>::value;
+		check_arg_type(pos, dtype);
+
+		const void *data = mxGetData(array[pos]);
+		T res;
+		memcpy(&res, data, sizeof(T));
+		return res;
+	}
 
     uint64_t uint64(int pos) const {
-        const void *data = mxGetData(array[pos]);
-        uint64_t res;
-        memcpy(&res, data, sizeof(uint64_t));
-        return res;
+		return num<uint64_t>(pos);
     }
 
     template<typename T>
@@ -68,8 +96,7 @@ public:
     }
 
     handle hdl(int pos) const {
-        uint64_t address = uint64(pos);
-        handle h(address);
+		handle h = handle(uint64(pos));
         return h;
     }
 
@@ -90,26 +117,14 @@ class infusor : public argument_helper<mxArray> {
 public:
     infusor(mxArray **arr, int n) : argument_helper(arr, n) { }
 
-    void set(int pos, std::string str) {
-        if (check_size(pos)) {
-            return;
-        }
+	template<typename T>
+	void set(size_t pos, T &&value) {
+		mxArray *array = make_mx_array(std::forward<T>(value));
+		set(pos, array);
+	}
 
-        array[pos] = mxCreateString(str.c_str());
-    }
-
-    void set(int pos, uint64_t v) {
-        array[pos] = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
-        void *pointer = mxGetPr(array[pos]);
-        memcpy(pointer, &v, sizeof(v));
-    }
-
-    void set(int pos, mxArray *arr) {
+    void set(size_t pos, mxArray *arr) {
         array[pos] = arr;
-    }
-
-    void set(int pos, const handle &h) {
-        set(pos, h.address());
     }
 
 private:

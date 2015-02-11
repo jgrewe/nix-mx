@@ -1,8 +1,8 @@
 classdef Entity < handle
-    %ENTITY base class for nix entities
+    %Entity base class for nix entities
     %   handles object lifetime
     
-    properties
+    properties(Hidden)
         nix_handle
     end
     

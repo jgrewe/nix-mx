@@ -40,7 +40,7 @@
 SET(MATLAB_FOUND 0)
 IF(WIN32)
   # Search for a version of Matlab available, starting from the most modern one to older versions
-  FOREACH(MATVER "7.14" "7.11" "7.10" "7.9" "7.8" "7.7" "7.6" "7.5" "7.4")
+  FOREACH(MATVER "7.14" "7.12" "7.11" "7.10" "7.9" "7.8" "7.7" "7.6" "7.5" "7.4")
     IF((NOT DEFINED MATLAB_ROOT)
         OR ("${MATLAB_ROOT}" STREQUAL "")
         OR ("${MATLAB_ROOT}" STREQUAL "/registry"))
@@ -53,39 +53,28 @@ IF(WIN32)
       OR ("${MATLAB_ROOT}" STREQUAL "/registry"))
   ENDFOREACH(MATVER)
 
-  # Directory name depending on whether the Windows architecture is 32
-  # bit or 64 bit
-  set(CMAKE_SIZEOF_VOID_P 8) # Note: For some weird reason this variable is undefined in my system...
-  IF(CMAKE_SIZEOF_VOID_P MATCHES "4")
-    SET(WINDIR "win32")
-  ELSEIF(CMAKE_SIZEOF_VOID_P MATCHES "8")
-    SET(WINDIR "win64")
-  ELSE(CMAKE_SIZEOF_VOID_P MATCHES "4")
-    MESSAGE(FATAL_ERROR
-      "CMAKE_SIZEOF_VOID_P (${CMAKE_SIZEOF_VOID_P}) doesn't indicate a valid platform")
-  ENDIF(CMAKE_SIZEOF_VOID_P MATCHES "4")
+  EXECUTE_PROCESS(COMMAND "${MATLAB_ROOT}/bin/mexext.bat"
+                  OUTPUT_VARIABLE MATLAB_MEXEXT
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+  IF(NOT MATLAB_MEXEXT)
+     MESSAGE(FATAL_ERROR "mexext.bat not found. Meh!")
+  ENDIF()
+
+  IF(MATLAB_MEXEXT STREQUAL "mexw32")
+      SET(WINDIR "win32")
+  ELSE()
+      SET(WINDIR "win64")
+  ENDIF()
 
   # Folder where the MEX libraries are, depending of the Windows compiler
-  IF(${CMAKE_GENERATOR} MATCHES "Visual Studio 6")
-    SET(MATLAB_LIBRARIES_DIR "${MATLAB_ROOT}/extern/lib/${WINDIR}/microsoft/msvc60")
-  ELSEIF(${CMAKE_GENERATOR} MATCHES "Visual Studio 7")
-    # Assume people are generally using Visual Studio 7.1,
-    # if using 7.0 need to link to: ../extern/lib/${WINDIR}/microsoft/msvc70
-    SET(MATLAB_LIBRARIES_DIR "${MATLAB_ROOT}/extern/lib/${WINDIR}/microsoft/msvc71")
-    # SET(MATLAB_LIBRARIES_DIR "${MATLAB_ROOT}/extern/lib/${WINDIR}/microsoft/msvc70")
-  ELSEIF(${CMAKE_GENERATOR} MATCHES "Borland")
-    # Assume people are generally using Borland 5.4,
-    # if using 7.0 need to link to: ../extern/lib/${WINDIR}/microsoft/msvc70
-    SET(MATLAB_LIBRARIES_DIR "${MATLAB_ROOT}/extern/lib/${WINDIR}/microsoft/bcc54")
-    # SET(MATLAB_LIBRARIES_DIR "${MATLAB_ROOT}/extern/lib/${WINDIR}/microsoft/bcc50")
-    # SET(MATLAB_LIBRARIES_DIR "${MATLAB_ROOT}/extern/lib/${WINDIR}/microsoft/bcc51")
-  ELSEIF(${CMAKE_GENERATOR} MATCHES "Visual Studio*")
+  IF(${CMAKE_GENERATOR} MATCHES "Visual Studio*")
     # If the compiler is Visual Studio, but not any of the specific
     # versions above, we try our luck with the microsoft directory
     SET(MATLAB_LIBRARIES_DIR "${MATLAB_ROOT}/extern/lib/${WINDIR}/microsoft/")
-  ELSE(${CMAKE_GENERATOR} MATCHES "Visual Studio 6")
+  ELSE()
     MESSAGE(FATAL_ERROR "Generator not compatible: ${CMAKE_GENERATOR}")
-  ENDIF(${CMAKE_GENERATOR} MATCHES "Visual Studio 6")
+  ENDIF()
 
   # Get paths to the Matlab MEX libraries
   FIND_LIBRARY(MATLAB_MEX_LIBRARY
